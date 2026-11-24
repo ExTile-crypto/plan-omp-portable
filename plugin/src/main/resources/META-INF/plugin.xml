@@ -1,0 +1,17 @@
+<idea-plugin>
+  <id>local.planomp.implementer</id>
+  <name>Plan-omp Implementer</name>
+  <version>0.1.1</version>
+  <vendor>Local</vendor>
+  <description><![CDATA[
+    Shows the local implementer model's live thinking, tool calls, results, and progress during a plan-omp step.
+    It reads local run files only and sends nothing to any service.
+  ]]></description>
+  <idea-version since-build="262" until-build="262.*"/>
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.jcef</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="Implementer" anchor="right" secondary="true" icon="AllIcons.Toolwindows.ToolWindowRun" doNotActivateOnStart="true" factoryClass="local.planomp.ImplementerToolWindowFactory"/>
+    <postStartupActivity implementation="local.planomp.ImplementerStartup"/>
+  </extensions>
+</idea-plugin>

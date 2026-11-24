@@ -22,31 +22,27 @@ Each step must state the files to change, the exact behavior, constraints, and h
 
 Mark a step **risky** if it touches money, authentication or permissions, data deletion or migrations, transactions or concurrency, or anything hard to undo. Mark every other step **routine**. If unsure, mark it risky.
 
+For each risky step, write the approach yourself in the step file while planning: the design, order of operations, invariants, failure handling, and edge cases. Base it on the code you read. Do not ask the local model to draft it.
+
 ## 2. Implement each step
 
-Risky steps use all four stages below. Routine steps use only stage 3, skip the advisor, and go straight to your review in section 3.
+Write each step to a step file, then run stage 1. Risky steps also use stage 2. Routine steps skip the advisor and go straight to your review in section 3.
 
 The advisor is the `plan-omp-advisor` Claude Code subagent, which has its own model setting. If it is unavailable in this session, use a general-purpose subagent with model `sonnet`, tell it to read `~/.claude/agents/plan-omp-advisor.md` and follow it, and limit it to Read, Grep, and Glob. Never give the advisor's job to omp.
 
+**Run one step at a time.** Run only one executor at a time. A step running in the background still counts as running. Start the next step only after the current step's patch has been applied, so every snapshot includes the earlier work.
+
 For each step, in order:
 
-1. **Approach.** Write the step to a temporary file and get a read-only approach from the local model:
-
-   ```bash
-   python3 -I "${CLAUDE_SKILL_DIR}/scripts/omp_exec.py" --repo "<repo>" --task-file "<step-file>" --phase propose
-   ```
-
-2. **Approach checkpoint.** Give the advisor the goal, step, repository path, and the `approach` from the JSON. On `continue`, proceed. On `revise`, add its instructions to the step and request the approach again, at most once. On `stop`, stop and ask the user. Skip this checkpoint only for a purely mechanical one-line change.
-
-3. **Implement.** For a risky step, append the approved approach and the advisor's instructions to the step file. Then run:
+1. **Implement.** Run:
 
    ```bash
    python3 -I "${CLAUDE_SKILL_DIR}/scripts/omp_exec.py" --repo "<repo>" --task-file "<step-file>" --check "<verify-command>"
    ```
 
-4. **Patch checkpoint.** Before applying anything, give the advisor the goal, step file, repository path, and patch path. Follow its verdict as above. The advisor informs your review but does not replace it.
+2. **Patch checkpoint (risky steps only).** Before applying anything, give the advisor the goal, step file, repository path, and patch path. On `continue`, proceed to your review. On `revise`, add its instructions to the step and run it again, at most once. On `stop`, stop and ask the user. The advisor informs your review but does not replace it.
 
-Use a Bash timeout of 600000 and run longer steps in the background. The script does not modify the repository. It prints JSON with `status`, `phase`, `approach`, `patch`, `files_changed`, `symlinks_changed`, and `check`. The approach status is `proposed`, and an `unexpected_changes` result must be rejected.
+Use a Bash timeout of 600000 and run longer steps in the background. The script does not modify the repository. It prints JSON with `status`, `patch`, `files_changed`, `symlinks_changed`, `repeated_text`, and `check`.
 
 The user can follow each step live by running `plan-omp-watch` in a terminal.
 
@@ -65,6 +61,7 @@ Reject the patch if it:
 - goes beyond the step or weakens or deletes tests
 - changes a symlink, CI config, git hooks, build scripts, dependencies, `.claude`, or `.omp` files without the step requiring it
 - adds secrets, network calls, or obfuscated code
+- has status `repeated_text`, unless the step explicitly requires that text. The model looped while writing it. Correct the listed lines yourself, or retry with the exact intended text written in the step
 
 To accept it:
 

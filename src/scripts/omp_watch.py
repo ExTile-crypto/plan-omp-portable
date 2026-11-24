@@ -62,6 +62,9 @@ def compact(number) -> str:
     return f"{value / 1000:.1f}K" if value >= 1000 else f"{value:.0f}"
 
 
+THOUGHT_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
 class View:
     STATUS = {
         "ok": "Patch is ready for the Claude advisor and review.",
@@ -76,6 +79,8 @@ class View:
 
     def __init__(self, color: bool):
         self.color = color
+        self.focus = False
+        self.in_thinking = False
         self.reset()
 
     def reset(self):
@@ -85,13 +90,34 @@ class View:
     def paint(self, code: str, text: str) -> str:
         return f"\x1b[{code}m{text}\x1b[0m" if self.color else text
 
+    def end_thinking(self):
+        if self.in_thinking:
+            print(flush=True)
+            self.in_thinking = False
+
+    def think(self, value):
+        text = THOUGHT_CONTROL.sub("", str(value or ""))
+        if not text:
+            return
+        if not self.in_thinking:
+            print("    ", end="")
+            self.in_thinking = True
+        print(self.paint("2;3", text.replace("\n", "\n    ")), end="", flush=True)
+
     def out(self, text: str = ""):
+        self.end_thinking()
         print(text, flush=True)
 
     def row(self, r: dict):
         kind, at = r.get("kind"), self.paint("2", clock(r.get("t")))
+        if kind == "thinking":
+            self.think(r.get("text"))
+            return
         if kind == "start":
             self.reset()
+            if self.focus:
+                self.end_thinking()
+                print(self.paint("1;36", "▶ Implementer started"), file=sys.stderr, flush=True)
             self.out()
             self.out(self.paint("1;36", ("━━ Approach check: " if r.get("phase") == "propose" else "━━ Step: ") + clean(r.get("title"), 100)))
             self.out(self.paint("2", f"   {clean(r.get('repo_name'), 40)} · {clean(r.get('model'), 60)} · run {clean(r.get('run'), 40)}"))
@@ -586,6 +612,7 @@ def main() -> int:
     p.add_argument("--repo", help="only follow steps for this repository")
     p.add_argument("--runs-dir", default=str(DEFAULT_RUNS), help=argparse.SUPPRESS)
     p.add_argument("--no-color", action="store_true", help="plain text output")
+    p.add_argument("--focus-on-step", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--tokens", action="store_true", help="print Claude and local token use and exit")
     p.add_argument("--reset", action="store_true", help="start the token counters from zero for this repository; logs are kept")
     p.add_argument("--claude-dir", default=str(CLAUDE_PROJECTS), help=argparse.SUPPRESS)
@@ -594,6 +621,7 @@ def main() -> int:
     repo = repo_root(a.repo) if a.repo else None
     color = sys.stdout.isatty() and not a.no_color and "NO_COLOR" not in os.environ
     view = View(color)
+    view.focus = a.focus_on_step
     usage = ClaudeUsage(Path(a.claude_dir).expanduser())
     local = LocalUsage(runs)
 

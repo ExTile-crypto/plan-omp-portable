@@ -4,7 +4,7 @@ Keep these files in `$(git -C "<repo>" rev-parse --absolute-git-dir)/plan-omp/`.
 
 Before planning, read `run.md`, `brief.md`, and `map.md` if they exist. They are hints, so the current code and the user's request win. Correct anything you find to be wrong.
 
-**`run.md` is the checkpoint.** Record the goal, starting `HEAD`, each step with its risk and status (`pending`, `approved`, `patched`, `applied`, or `failed`), its step file, its patch path, and decisions that affect later steps. Keep step files in `plan-omp/steps/`. Update `run.md` after every status change.
+**`run.md` is the checkpoint.** Record the goal, starting `HEAD`, each step with its risk and status (`pending`, `patched`, `applied`, or `failed`), its step file, its patch path, and decisions that affect later steps. Keep step files in `plan-omp/steps/`. Update `run.md` after every status change.
 
 - If `run.md` is unfinished and has the same goal, resume at the first step that is not `applied`. Before trusting `applied`, confirm the patch is present with `git -C "<repo>" apply --reverse --check "<patch>"`. If it is not, treat the step as not applied.
 - Never apply a saved patch without reviewing it in this session under section 3.
