@@ -309,6 +309,7 @@ THOUGHT_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 DETAIL_LIMIT = 24000
+PATCH_TEXT_LIMIT = 40000
 
 
 def detail_text(value) -> str:
@@ -598,6 +599,7 @@ def main() -> int:
     shutil.rmtree(run / "shadow.git", ignore_errors=True)
     (run / "omp-config.yml").unlink(missing_ok=True)
 
+    patch_text = patch.read_text(errors="replace") if args.phase == "implement" and files and patch.exists() else ""
     print(json.dumps({
         "status": status,
         "phase": args.phase,
@@ -609,6 +611,8 @@ def main() -> int:
         "symlinks_changed": symlinks,
         "repeated_text": repeated,
         "patch": str(patch),
+        "patch_text": patch_text[:PATCH_TEXT_LIMIT],
+        "patch_truncated": len(patch_text) > PATCH_TEXT_LIMIT,
         "log": str(log),
         "progress": str(progress.path),
         "check": check,
