@@ -11,8 +11,9 @@ prompt.
 
 ```
 src/SKILL.md                 the Claude Code skill, with ${CLAUDE_SKILL_DIR}
-src/scripts/omp_exec.py      sandboxed executor, unchanged from upstream
-src/scripts/omp_watch.py     live progress, unchanged from upstream
+src/scripts/omp_exec.py      sandboxed executor
+src/scripts/omp_watch.py     live progress
+src/planning-files.md        checkpoint, executor brief, and code map rules
 src/advisor.md               read-only reviewer instructions
 src/omp/plan-omp-advisor.md  omp advisor agent, limited to read, grep and glob
 install_plan_omp.sh          rewrites the copy for a non-Claude harness
@@ -83,6 +84,19 @@ modelRoles:
 Use an Anthropic API key for Claude models in omp. Anthropic's terms limit
 subscription logins to Claude Code and Anthropic's own apps. Start a new chat
 after installing, because a running chat keeps the instructions it loaded.
+
+## Planning files
+
+The skill keeps three small files in `.git/plan-omp/`, so they stay with the clone
+and never enter a patch or commit:
+
+| File | Purpose |
+|---|---|
+| `run.md` | Checkpoint for resuming an interrupted run from its first unapplied step |
+| `brief.md` | Standing project rules, added to every executor step automatically |
+| `map.md` | Short pointers to the files and symbols behind each feature |
+
+Start the skill with the same goal to resume. Delete `.git/plan-omp/` to clear them.
 
 ## Watch progress and usage
 

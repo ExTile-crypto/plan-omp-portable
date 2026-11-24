@@ -26,6 +26,7 @@ from pathlib import Path
 DEFAULT_URL = "http://127.0.0.1:8080"
 SANDBOX_PORT = 8080
 TAIL_LINES = 40
+BRIEF_LIMIT = 6000
 AGENT_DIR = "/home/agent/.omp/agent"
 
 PROMPT = """You are the execution agent for one step of a plan written by a senior engineer.
@@ -88,6 +89,17 @@ def find_omp() -> Path:
     if not path.is_file():
         fail("omp is not installed.")
     return path
+
+
+def project_brief(repo: Path) -> str:
+    """Standing project rules the planner keeps for the executor in this clone."""
+    result = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return ""
+    try:
+        return (Path(result.stdout.strip()) / "plan-omp" / "brief.md").read_text(errors="replace").strip()[:BRIEF_LIMIT]
+    except OSError:
+        return ""
 
 
 def repo_root(path: str) -> Path:
@@ -417,13 +429,16 @@ def main() -> int:
     socket_dir = Path(tempfile.mkdtemp(prefix="ox-", dir=os.environ.get("XDG_RUNTIME_DIR") or "/tmp"))
     relay = None
     started = time.time()
+    brief = ""
     try:
         snapshot(repo, work)
         init_shadow(run)
         config = write_sandbox_config(run, model)
         relay = start_relay(url, socket_dir / "llm.sock")
         phase_args = ["--tools", "read,grep,glob"] if args.phase == "propose" else []
-        prompt = (PROPOSE_PROMPT if args.phase == "propose" else PROMPT).format(task=task)
+        brief = project_brief(repo)
+        full_task = f"Standing project rules:\n{brief}\n\nThis step:\n{task}" if brief else task
+        prompt = (PROPOSE_PROMPT if args.phase == "propose" else PROMPT).format(task=full_task)
         command = [
             "bash", "-c", RELAY_SCRIPT, "relay",
             "/opt/omp/omp", "-p", "--mode", "json",
@@ -487,6 +502,7 @@ def main() -> int:
         "log": str(log),
         "progress": str(progress.path),
         "check": check,
+        "brief_used": bool(brief),
         "executor_output_tail": tail(log),
     }, indent=2))
     return 0 if status in ("ok", "proposed") else 2

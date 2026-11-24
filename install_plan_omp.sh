@@ -3,7 +3,7 @@
 #
 #   install_plan_omp.sh [dest_root]      default: $HOME/.agents/skills
 #
-# Reads src/SKILL.md, src/scripts/*, src/advisor.md from this repository and
+# Reads src/SKILL.md, src/planning-files.md, src/scripts/*, src/advisor.md from this repository and
 # writes into <dest_root>/plan-omp-portable, plus the advisor agent when omp is
 # installed. Stops without writing if
 # src/SKILL.md no longer matches the rewrite contract below.
@@ -39,6 +39,10 @@ for old, new in swaps:
     if old not in text:
         sys.exit(f"SKILL.md has changed, cannot find: {old[:50]}")
     text = text.replace(old, new)
+planning = (advisor.parent / "planning-files.md").read_text()
+if text.count("## 1. Plan\n") != 1:
+    sys.exit("SKILL.md has changed, cannot place the planning files section")
+text = text.replace("## 1. Plan\n", planning + "## 1. Plan\n")
 text, described = re.subn(
     r"^description: .*$",
     "description: Plan a coding task, check risky steps with a read-only reviewer, "
