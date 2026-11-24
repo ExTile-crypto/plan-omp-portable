@@ -14,6 +14,18 @@ Use the dedicated file tools when they fit. Keep updates short and report outcom
 
 """
 ADVISOR = "The advisor is the `plan-omp-advisor` subagent. Start it with the Agent tool. It is read-only and runs on its own model. Never give its job to the local executor. If it is unavailable, do the check yourself and tell the user that no independent advisor ran."
+RULES = """## Keep Claude requests low
+
+Every request sends this whole conversation again, so a few full requests cost far less than many small ones.
+
+- Prefer fewer, larger steps. Combine routine changes into one step when one executor run can handle them, and keep risky changes in their own step.
+- Put independent tool calls in one message, such as all planning files and step files.
+- The executor's JSON includes `patch_text`. Review the patch there. Read the patch file only if `patch_truncated` is true.
+- Accept a step with one command that applies the patch, runs the verify command, and starts the next step's executor only if both succeed. Update `run.md` in the same message.
+- Fix problems in one pass: find everything wrong with a patch first, then make all corrections in one message and verify once.
+- Finish with one command that runs the full tests and any smoke checks, and update `run.md` in the same message.
+
+"""
 GIT = '$(git -C "<repo>" rev-parse --absolute-git-dir)'
 
 
@@ -29,7 +41,7 @@ def main() -> int:
     src, dest = Path(sys.argv[1]), Path(sys.argv[2])
     skill = (src / "SKILL.md").read_text().split("---\n", 2)[2]
     planning = (src / "planning-files.md").read_text()
-    body = HEADER + planning + skill[skill.index("## 1. Plan\n"):]
+    body = HEADER + planning + RULES + skill[skill.index("## 1. Plan\n"):]
     body, count = re.subn(r"^The advisor is the `plan-omp-advisor`.*$", lambda _: ADVISOR, body, flags=re.M)
     if count != 1:
         raise SystemExit("The skill source has changed, cannot rewrite the advisor rule")

@@ -19,7 +19,25 @@ plan flow needs. In testing with Claude Code 2.1.331, a session started at about
    runs the checks.
 
 Only one step runs at a time, and each patch is applied before the next step
-starts. A patch with looping repeated text gets the status `repeated_text`.
+starts. The lean prompt also keeps Claude requests low: it prefers fewer, larger
+steps, reviews the patch from the executor's result, and batches fixes, checks,
+and plan updates. A patch with looping repeated text gets the status `repeated_text`.
+
+## Usage results
+
+One benchmark on a small Python project compared normal Claude Code with this
+flow on the same goal. Costs are API-price estimates reported by Claude Code.
+
+| Setup | Claude cost | Claude requests | Hidden tests |
+|---|---|---|---|
+| Claude Code alone | $0.64 | 5 | 9 of 9 |
+| Flow before request trimming | $0.82 | 22 | 9 of 9 |
+| Flow with request trimming | $0.66 | 13 | 9 of 9 |
+
+On small tasks the flow now roughly breaks even. It can only save Claude usage
+when the local model writes much more code than Claude has to plan and review,
+which this benchmark did not test. For small, well-defined tasks, run Claude Code
+directly.
 
 ## Requirements
 
