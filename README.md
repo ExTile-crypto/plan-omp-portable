@@ -14,6 +14,7 @@ src/SKILL.md                 the Claude Code skill, with ${CLAUDE_SKILL_DIR}
 src/scripts/omp_exec.py      sandboxed executor, unchanged from upstream
 src/scripts/omp_watch.py     live progress, unchanged from upstream
 src/advisor.md               read-only reviewer instructions
+src/omp/plan-omp-advisor.md  omp advisor agent, limited to read, grep and glob
 install_plan_omp.sh          rewrites the copy for a non-Claude harness
 ```
 
@@ -31,7 +32,7 @@ the harness's own model, so a cloud harness spends its own tokens on those passe
 ## Install
 
 ```bash
-git clone https://github.com/Zagitta/plan-omp-portable.git
+git clone https://github.com/ExTile-crypto/plan-omp-portable.git
 cd plan-omp-portable
 ./install_plan_omp.sh                       # → ~/.agents/skills/plan-omp-portable
 ./install_plan_omp.sh ~/.gemini/config/skills   # Antigravity, its own folder
@@ -51,7 +52,7 @@ never updates itself.
 
 | Harness | Folder | Start | Advisor kept read-only |
 |---|---|---|---|
-| omp | `~/.agents/skills` | `/skill:plan-omp-portable <goal>` | not enforced |
+| omp | `~/.agents/skills` | `/skill:plan-omp-portable <goal>` | `plan-omp-advisor` agent with `read`, `grep`, `glob` |
 | Codex | `~/.agents/skills` | `$plan-omp-portable <goal>` | instructions only, no separate sandbox |
 | OpenCode | `~/.agents/skills` | `@plan-omp-portable <goal>` | deny edit and shell in a subagent |
 | Cursor | `~/.agents/skills` | `/plan-omp-portable <goal>` | `readonly: true` in a subagent |
@@ -67,6 +68,34 @@ Read ~/.agents/skills/plan-omp-portable/SKILL.md and follow it. Goal: <your task
 
 Gemini CLI also reads `~/.agents/skills`, but Antigravity CLI replaced it on
 June 18, 2026.
+
+## Advisor in omp
+
+The installer adds `plan-omp-advisor` to `~/.omp/agent/agents` when omp is
+installed. It uses omp's `advisor` role, so a different model can check the local
+model's work. Set that role in `~/.omp/agent/config.yml`:
+
+```yaml
+modelRoles:
+  advisor: anthropic/claude-sonnet-5-5:medium
+```
+
+Use an Anthropic API key for Claude models in omp. Anthropic's terms limit
+subscription logins to Claude Code and Anthropic's own apps. Start a new chat
+after installing, because a running chat keeps the instructions it loaded.
+
+## Watch progress and usage
+
+```bash
+plan-omp-watch --repo .           # follow steps and token use live
+plan-omp-watch --repo . --tokens  # print the totals and exit
+plan-omp-watch --repo . --reset   # count from zero, keeping all logs
+```
+
+Local usage is cyan and Anthropic usage is magenta. `reread` is cached context
+sent again on a later request. `≥` marks a minimum, because steps from older
+executor versions did not record their cache split. Local work appears as the
+executor, `planner`, or `subagent`.
 
 ## Test the executor
 
