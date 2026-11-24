@@ -294,7 +294,7 @@ class Progress:
             output = usage.get("output") or 0
             generating = max((message.get("duration") or 0) - (message.get("ttft") or 0), 1) / 1000
             error = message.get("errorMessage")
-            self.emit("turn", output=output, context=(usage.get("input") or 0) + (usage.get("cacheRead") or 0), tps=round(output / generating, 1), error=clean(error, 160) if error else None)
+            self.emit("turn", output=output, context=(usage.get("input") or 0) + (usage.get("cacheRead") or 0), cache_read=usage.get("cacheRead") or 0, tps=round(output / generating, 1), error=clean(error, 160) if error else None)
             self.final = assistant_text(message) or self.final
         elif kind == "agent_end":
             for message in reversed(event.get("messages") or []):

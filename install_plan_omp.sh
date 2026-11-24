@@ -4,7 +4,8 @@
 #   install_plan_omp.sh [dest_root]      default: $HOME/.agents/skills
 #
 # Reads src/SKILL.md, src/scripts/*, src/advisor.md from this repository and
-# writes only into <dest_root>/plan-omp-portable. Stops without writing if
+# writes into <dest_root>/plan-omp-portable, plus the advisor agent when omp is
+# installed. Stops without writing if
 # src/SKILL.md no longer matches the rewrite contract below.
 set -eu
 
@@ -30,7 +31,7 @@ swaps = [
     ("argument-hint: <goal>\n", ""),
     ("Goal: $ARGUMENTS", "Goal: the task the user gave when starting this skill."),
     ("# Plan with Claude, implement with local omp, review with Claude", "# Plan here, implement with local omp, review here"),
-    ("Claude requests stay in this Claude Code session. Never configure or ask omp to call Claude.", "Your own requests stay in this session. Never configure or ask omp to call a cloud model."),
+    ("Claude requests stay in this Claude Code session. Never configure or ask omp to call Claude.", "Your own requests stay in this session. Never configure or ask the sandboxed executor to call a cloud model."),
     ("`.claude`, or `.omp` files", "`.claude`, `.codex`, `.agents`, `.cursor`, `.opencode`, `.gemini`, or `.omp` files"),
     ("${CLAUDE_SKILL_DIR}", str(dest)),
 ]
@@ -45,11 +46,13 @@ text, described = re.subn(
     text, count=1, flags=re.M,
 )
 review = (
-    "The advisor is a separate read-only reviewer. If this harness has subagents, start one, "
+    "The advisor is a separate read-only reviewer. In omp, always use the `plan-omp-advisor` task agent, "
+    "and never use `scout`, `task`, or another local agent for this check. If that agent is unavailable in omp, "
+    "do the check yourself and tell the user. In other harnesses, if subagents exist, start one, "
     f"tell it to read `{dest}/references/advisor.md` and follow it, and limit it to read and search tools. "
     "If the harness cannot restrict its tools, tell it not to edit files or run commands that change anything. "
     "If the harness has no subagents, do the check yourself in a separate pass using those instructions, "
-    "and tell the user that no independent advisor ran. Never give the advisor's job to omp."
+    "and tell the user that no independent advisor ran. Never give the advisor's job to the local executor or a local model."
 )
 text, advised = re.subn(r"^The advisor is the `plan-omp-advisor`.*$", lambda _: review, text, count=1, flags=re.M)
 if not described or not advised:
@@ -58,5 +61,12 @@ if not described or not advised:
 body = re.sub(r"^---\n.*?\n---\n+", "", advisor.read_text(), count=1, flags=re.S)
 (dest / "references" / "advisor.md").write_text(body)
 PY
+
+omp_dir="${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
+if [ -d "$omp_dir" ]; then
+  mkdir -p "$omp_dir/agents"
+  cp "$src/omp/plan-omp-advisor.md" "$omp_dir/agents/plan-omp-advisor.md"
+  echo "Installed omp advisor: $omp_dir/agents/plan-omp-advisor.md"
+fi
 
 [ -s "$dest/SKILL.md" ] && echo "Installed: $dest"
