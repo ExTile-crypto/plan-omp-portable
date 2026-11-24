@@ -91,13 +91,17 @@ def find_omp() -> Path:
     return path
 
 
-def project_brief(repo: Path) -> str:
-    """Standing project rules the planner keeps for the executor in this clone."""
-    result = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
-    if result.returncode != 0:
-        return ""
+def project_brief(repo: Path, brief_file: str = "") -> str:
+    """Standing project rules the planner keeps for this clone."""
+    if brief_file:
+        path = Path(brief_file)
+    else:
+        result = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
+        if result.returncode != 0:
+            return ""
+        path = Path(result.stdout.strip()) / "plan-omp" / "brief.md"
     try:
-        return (Path(result.stdout.strip()) / "plan-omp" / "brief.md").read_text(errors="replace").strip()[:BRIEF_LIMIT]
+        return path.read_text(errors="replace").strip()[:BRIEF_LIMIT]
     except OSError:
         return ""
 
@@ -194,6 +198,53 @@ def collect_patch(run: Path) -> tuple[Path, list[str], list[str]]:
     return patch, sorted(files), sorted(symlinks)
 
 
+REPEAT_RE = re.compile(r"(.{3,64}?)\1{7,}")
+REPEAT_MIN_CHARS = 120
+REPEAT_SCAN_CHARS = 20000
+HUNK_RE = re.compile(rb"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def repeated_unit(text: str) -> tuple[str, int] | None:
+    for match in REPEAT_RE.finditer(text[:REPEAT_SCAN_CHARS]):
+        unit, whole = match.group(1), match.group(0)
+        if len(whole) >= REPEAT_MIN_CHARS and sum(c.isalpha() for c in unit) >= 3 and len(set(unit.lower())) >= 3:
+            return unit, len(whole) // len(unit)
+    return None
+
+
+def repeated_text(patch: Path) -> list[dict]:
+    """Find added lines where the model looped on the same text."""
+    found: list[dict] = []
+    path = ""
+    old_left = new_left = line_no = 0
+    for raw in patch.read_bytes().split(b"\n"):
+        if old_left > 0 or new_left > 0:
+            marker = raw[:1]
+            if marker == b"+":
+                hit = repeated_unit(raw[1:].decode(errors="replace"))
+                if hit:
+                    found.append({"file": path, "line": line_no, "text": hit[0], "times": hit[1]})
+                line_no += 1
+                new_left -= 1
+            elif marker == b"-":
+                old_left -= 1
+            elif marker != b"\\":
+                line_no += 1
+                old_left -= 1
+                new_left -= 1
+            continue
+        if raw.startswith(b"+++ "):
+            name = raw[4:].decode(errors="replace").rstrip("\t").strip('"')
+            path = name[2:] if name.startswith("b/") else name
+            continue
+        hunk = HUNK_RE.match(raw)
+        if hunk:
+            old_left = int(hunk.group(1) or 1)
+            line_no = int(hunk.group(2))
+            new_left = int(hunk.group(3) or 1)
+    return found
+
+
 def write_sandbox_config(run: Path, model: str) -> Path:
     """A local-only config. The real omp config and saved logins never enter the sandbox."""
     selector = json.dumps(f"llama.cpp/{model}")
@@ -254,6 +305,20 @@ def assistant_text(message) -> str:
     return "".join(x.get("text", "") for x in message.get("content") or [] if isinstance(x, dict) and x.get("type") == "text").strip()
 
 
+THOUGHT_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+DETAIL_LIMIT = 24000
+
+
+def detail_text(value) -> str:
+    if isinstance(value, dict) and isinstance(value.get("content"), list):
+        value = "\n".join(p.get("text", "") for p in value["content"] if isinstance(p, dict) and p.get("type") == "text")
+    if not isinstance(value, str):
+        value = json.dumps(value, ensure_ascii=False, indent=2)
+    return THOUGHT_CONTROL.sub("", value).encode("utf-8", "replace").decode("utf-8")
+
+
 class Progress:
     """Turn omp's JSON event stream into a small timeline for plan-omp-watch."""
 
@@ -262,8 +327,12 @@ class Progress:
     def __init__(self, run: Path, log: Path):
         self.path, self.log = run / "progress.jsonl", log
         self.file = self.path.open("a", buffering=1, encoding="utf-8")
+        self.path.chmod(0o600)
+        details = os.open(run / "details.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        self.details = os.fdopen(details, "a", buffering=1, encoding="utf-8")
         self.lock = threading.Lock()
         self.state, self.final, self.raw, self.tools = None, "", [], {}
+        self.thought, self.thought_at = [], 0.0
 
     def emit(self, kind: str, **data) -> None:
         row = {"t": round(time.time(), 2), "kind": kind, **data}
@@ -288,18 +357,27 @@ class Progress:
 
     def handle(self, event: dict) -> None:
         kind = event.get("type")
+        update = (event.get("assistantMessageEvent") or {}) if kind == "message_update" else {}
+        if update.get("type") == "thinking_delta":
+            self.add_thought(update.get("delta"))
+        else:
+            self.flush_thought()
         if kind == "message_update":
-            state = self.STATES.get((event.get("assistantMessageEvent") or {}).get("type"))
+            state = self.STATES.get(update.get("type"))
             if state and state != self.state:
                 self.state = state
                 self.emit("activity", state=state)
         elif kind == "tool_execution_start":
             self.state = None
+            call = clean(event.get("toolCallId"), 80)
             self.tools[event.get("toolCallId")] = time.time()
-            self.emit("tool_start", tool=clean(event.get("toolName"), 30), target=tool_target(event.get("args")))
+            self.emit("tool_start", id=call, tool=clean(event.get("toolName"), 30), target=tool_target(event.get("args")))
+            self.detail(call, "args", event.get("args"))
         elif kind == "tool_execution_end":
+            call = clean(event.get("toolCallId"), 80)
             started = self.tools.pop(event.get("toolCallId"), None)
-            self.emit("tool_end", tool=clean(event.get("toolName"), 30), ok=not event.get("isError"), seconds=round(time.time() - started, 1) if started else None)
+            self.emit("tool_end", id=call, tool=clean(event.get("toolName"), 30), ok=not event.get("isError"), seconds=round(time.time() - started, 1) if started else None)
+            self.detail(call, "result", event.get("result"))
         elif kind == "turn_end":
             message = event.get("message") or {}
             usage = message.get("usage") or {}
@@ -315,13 +393,40 @@ class Progress:
                     self.final = text
                     break
 
+    def detail(self, call: str, part: str, value) -> None:
+        try:
+            body = detail_text(value)
+            row = {"kind": "detail", "id": call, "part": part, "text": body[:DETAIL_LIMIT], "truncated": len(body) > DETAIL_LIMIT}
+            with self.lock:
+                if not self.details.closed:
+                    self.details.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            self.raw = (self.raw + [f"detail error: {exc}"])[-TAIL_LINES:]
+
+    def add_thought(self, text) -> None:
+        if not isinstance(text, str) or not text:
+            return
+        self.thought.append(text)
+        if sum(map(len, self.thought)) >= 160 or time.time() - self.thought_at >= 0.25:
+            self.flush_thought()
+
+    def flush_thought(self) -> None:
+        if not self.thought:
+            return
+        text = THOUGHT_CONTROL.sub("", "".join(self.thought)).encode("utf-8", "replace").decode("utf-8")
+        self.thought, self.thought_at = [], time.time()
+        if text:
+            self.emit("thinking", text=text)
+
     def write_output(self) -> None:
         parts = self.raw + ([self.final] if self.final else [])
         self.log.write_text("\n".join(parts) + ("\n" if parts else ""), encoding="utf-8", errors="replace")
 
     def close(self) -> None:
+        self.flush_thought()
         with self.lock:
             self.file.close()
+            self.details.close()
 
 
 def run_sandboxed(command: list[str], work: Path, omp: Path, socket_dir: Path | None, timeout: int, log: Path, config: Path | None = None, on_line=None) -> int | None:
@@ -403,6 +508,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=1800, help="Executor timeout in seconds")
     parser.add_argument("--check-timeout", type=int, default=300)
     parser.add_argument("--runs-dir", default=str(cache / "omp-exec" / "runs"))
+    parser.add_argument("--brief-file", default="")
     return parser.parse_args()
 
 
@@ -436,7 +542,7 @@ def main() -> int:
         config = write_sandbox_config(run, model)
         relay = start_relay(url, socket_dir / "llm.sock")
         phase_args = ["--tools", "read,grep,glob"] if args.phase == "propose" else []
-        brief = project_brief(repo)
+        brief = project_brief(repo, args.brief_file)
         full_task = f"Standing project rules:\n{brief}\n\nThis step:\n{task}" if brief else task
         prompt = (PROPOSE_PROMPT if args.phase == "propose" else PROMPT).format(task=full_task)
         command = [
@@ -459,9 +565,10 @@ def main() -> int:
     seconds = round(time.time() - started, 1)
 
     patch, files, symlinks = collect_patch(run)
+    repeated = repeated_text(patch) if args.phase == "implement" else []
 
     check = None
-    if args.check and args.phase == "implement" and exit_code == 0 and files:
+    if args.check and args.phase == "implement" and exit_code == 0 and files and not repeated:
         check_log = run / "check.log"
         progress.emit("check_start", command=clean(args.check))
         check_exit = run_sandboxed(["bash", "-c", args.check], work, omp, None, args.check_timeout, check_log)
@@ -476,6 +583,8 @@ def main() -> int:
         status = "unexpected_changes" if files else "proposed" if progress.final.strip() else "no_approach"
     elif not files:
         status = "no_changes"
+    elif repeated:
+        status = "repeated_text"
     elif check is not None and not check["passed"]:
         status = "check_failed"
     else:
@@ -498,6 +607,7 @@ def main() -> int:
         "executor_exit_code": exit_code,
         "files_changed": files,
         "symlinks_changed": symlinks,
+        "repeated_text": repeated,
         "patch": str(patch),
         "log": str(log),
         "progress": str(progress.path),

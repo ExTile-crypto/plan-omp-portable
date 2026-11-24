@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementer</title>
+<style>
+:root {
+  --bg: #1e1f22; --fg: #dfe1e5;
+  --ui: Inter, "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --panel: color-mix(in srgb, var(--fg) 4%, var(--bg));
+  --hover: color-mix(in srgb, var(--fg) 8%, var(--bg));
+  --line: color-mix(in srgb, var(--fg) 14%, var(--bg));
+  --muted: color-mix(in srgb, var(--fg) 60%, var(--bg));
+  --green: #4caf50; --red: #e5534b; --blue: #4a9eff; --amber: #e0a030;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 13px/1.5 var(--ui); overflow: hidden; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+button:focus-visible { outline: 1px solid var(--blue); outline-offset: -1px; }
+header { flex: none; padding: 10px 14px 9px; border-bottom: 1px solid var(--line); }
+.top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+h1 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 10px; font-size: 11px; color: var(--muted); }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.running { color: var(--blue); } .pill.ok { color: var(--green); } .pill.bad { color: var(--red); } .pill.warn { color: var(--amber); }
+.pill.running::before { animation: pulse 1.2s ease-in-out infinite; }
+#sub { margin-top: 1px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#stats { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 6px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#stats b { color: var(--fg); font-weight: 500; }
+main { position: relative; flex: 1; min-height: 0; }
+#log { position: absolute; inset: 0; overflow-y: auto; padding: 10px 12px 18px; }
+#empty { margin: 34px 12px; text-align: center; color: var(--muted); }
+.block { margin-bottom: 8px; }
+.think-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 2px; color: var(--muted); }
+.think-head:hover { color: var(--fg); }
+.chev { display: inline-block; width: 10px; font-size: 10px; transition: transform .12s; }
+.open > .think-head .chev, .row.open > .row-head .chev { transform: rotate(90deg); }
+.think-meta { margin-left: auto; font-size: 11px; }
+.live .think-title { animation: fade 1.4s ease-in-out infinite; }
+.think-body { display: none; margin: 2px 0 0 7px; padding: 2px 0 2px 11px; max-height: 340px; overflow-y: auto; border-left: 2px solid var(--line); color: var(--muted); font: 12.5px/1.55 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.open > .think-body { display: block; }
+.card { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); overflow: hidden; }
+.card-head { display: flex; align-items: center; gap: 7px; padding: 6px 10px; font-weight: 500; }
+.card-head svg { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--muted); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.count { padding: 0 6px; border-radius: 8px; background: var(--hover); color: var(--muted); font-size: 11px; font-weight: 400; }
+.row { border-top: 1px solid var(--line); }
+.row-head { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 4px 10px; }
+.row-head:hover { background: var(--hover); }
+.row .chev { flex: none; color: var(--muted); }
+.name { flex: none; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+.cmd .name { flex: 1; max-width: none; font: 12px var(--mono); }
+.time { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dot { flex: none; width: 7px; height: 7px; margin-left: 2px; border-radius: 50%; background: var(--blue); animation: pulse 1.2s ease-in-out infinite; }
+.dot.ok { background: var(--green); animation: none; } .dot.bad { background: var(--red); animation: none; }
+.err-line { padding: 0 10px 5px 26px; color: var(--red); font-size: 11.5px; overflow-wrap: anywhere; }
+.details { display: none; padding: 2px 10px 8px; }
+.row.open > .details { display: block; }
+.label { margin: 5px 0 2px; color: var(--muted); font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase; }
+pre.code { margin: 0; padding: 6px 8px; max-height: 300px; overflow: auto; border-radius: 5px; background: color-mix(in srgb, var(--bg) 70%, black); font: 11.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.note { margin-top: 3px; color: var(--amber); font-size: 11px; }
+.notice { padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--red) 9%, var(--bg)); overflow-wrap: anywhere; }
+.notice.good { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); background: color-mix(in srgb, var(--green) 9%, var(--bg)); }
+.notice strong { font-weight: 600; }
+.files { margin: 3px 0 0; padding: 0; list-style: none; color: var(--muted); font: 11.5px/1.6 var(--mono); overflow-wrap: anywhere; }
+footer { flex: none; display: flex; align-items: center; gap: 7px; min-height: 26px; padding: 3px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
+#latest { position: absolute; right: 16px; bottom: 10px; display: none; padding: 3px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--hover); font-size: 11.5px; }
+#latest.show { display: block; }
+@keyframes pulse { 50% { opacity: .35; } }
+@keyframes fade { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="top"><h1 id="title">Implementer</h1><span id="pill" class="pill">Idle</span></div>
+  <div id="sub">Waiting for a plan step</div>
+  <div id="stats"></div>
+</header>
+<main>
+  <div id="log"><div id="empty">The local model's thinking and tool calls will appear here when a step starts.</div></div>
+  <button id="latest" type="button">↓ Latest</button>
+</main>
+<footer><span id="now">Idle</span></footer>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const log = $('log');
+  const ICONS = {
+    file: 'M6 2h8l4 4v16H6z M14 2v4h4',
+    terminal: 'M3 5h18v14H3z M7 9l3 3-3 3 M13 15h4',
+    search: 'M11 4a7 7 0 1 0 0 14a7 7 0 0 0 0-14z M16.5 16.5L21 21',
+    pencil: 'M4 20l1-4L16 5l3 3L8 19z',
+    tool: 'M14 6l4 4-8 8H6v-4z',
+  };
+  const FAMILIES = {
+    read: ['read', 'file', 'Read File', 'Batch Read Files'],
+    grep: ['search', 'search', 'Search', 'Batch Search'],
+    glob: ['search', 'search', 'Search', 'Batch Search'],
+    find: ['search', 'search', 'Search', 'Batch Search'],
+    bash: ['bash', 'terminal', 'Run Command', 'Batch Run Commands'],
+    write: ['write', 'pencil', 'Write File', 'Batch Write Files'],
+    edit: ['edit', 'pencil', 'Edit File', 'Batch Edit Files'],
+  };
+  const ENDINGS = {
+    ok: ['Finished', 'ok'], proposed: ['Approach ready', 'ok'], no_changes: ['No changes', 'warn'],
+    no_approach: ['No approach', 'warn'], check_failed: ['Check failed', 'bad'], executor_failed: ['Failed or stopped', 'bad'],
+    timeout: ['Timed out', 'bad'], repeated_text: ['Repeated text', 'bad'], unexpected_changes: ['Unexpected changes', 'bad'],
+  };
+  const ACTIVITY = { thinking: 'Thinking…', 'preparing a tool call': 'Preparing a tool call…', 'writing its summary': 'Writing its summary…' };
+  let s;
+  let stick = true;
+
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const icon = (name) => {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', ICONS[name] || ICONS.tool);
+    svg.append(path);
+    return svg;
+  };
+  const compact = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n || 0));
+  const span = (sec) => {
+    sec = Math.max(0, Math.round(sec || 0));
+    if (sec < 60) return sec + 's';
+    const m = Math.floor(sec / 60);
+    return m < 60 ? m + 'm ' + (sec % 60) + 's' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  };
+  const blank = () => ({ title: '', start: 0, end: 0, tokens: 0, generating: 0, turns: 0, context: 0, peak: 0, errors: 0, running: false, ended: false, think: null, group: null, rows: new Map(), pending: new Map(), early: new Map() });
+
+  function setPill(text, cls) { $('pill').textContent = text; $('pill').className = 'pill ' + (cls || ''); }
+  function setNow(text) { $('now').textContent = text; }
+  function renderStats() {
+    const stats = $('stats');
+    stats.replaceChildren();
+    if (!s.start) return;
+    const finish = s.end || (s.running ? Date.now() / 1000 : s.last || s.start);
+    const items = [['Elapsed', span(finish - s.start)], ['Tokens', compact(s.tokens)], ['Speed', s.generating > 0 ? Math.round(s.tokens / s.generating) + ' tok/s' : '–'], ['Context', compact(s.context)], ['Turns', String(s.turns)]];
+    if (s.errors) items.push(['Errors', String(s.errors)]);
+    for (const [name, value] of items) {
+      const item = el('span', '', name + ' ');
+      item.append(el('b', '', value));
+      stats.append(item);
+    }
+  }
+  function add(node) {
+    $('empty')?.remove();
+    log.append(node);
+    return node;
+  }
+  function endThinking() {
+    const t = s.think;
+    if (!t) return;
+    t.wrap.classList.remove('live');
+    if (!t.wrap.dataset.touched) t.wrap.classList.remove('open');
+    t.meta.textContent = '~' + compact(t.chars / 4) + ' tokens';
+    s.think = null;
+  }
+  function addThinking(text) {
+    s.group = null;
+    if (!s.think) {
+      const wrap = el('section', 'block thinking open live');
+      const head = el('button', 'think-head');
+      head.type = 'button';
+      const meta = el('span', 'think-meta');
+      head.append(el('span', 'chev', '▶'), el('span', 'think-title', 'Thinking'), meta);
+      const body = el('div', 'think-body');
+      const node = document.createTextNode('');
+      body.append(node);
+      head.addEventListener('click', () => { wrap.classList.toggle('open'); wrap.dataset.touched = '1'; });
+      wrap.append(head, body);
+      add(wrap);
+      s.think = { wrap, body, node, meta, chars: 0 };
+    }
+    const t = s.think;
+    const follow = t.body.scrollHeight - t.body.scrollTop - t.body.clientHeight < 28;
+    t.node.appendData(text);
+    t.chars += text.length;
+    t.meta.textContent = '~' + compact(t.chars / 4) + ' tokens';
+    if (follow) t.body.scrollTop = t.body.scrollHeight;
+  }
+  function splitPath(target) {
+    const text = String(target || '').replace(/^\/workspace\/?/, '') || '.';
+    const cut = text.replace(/:\d+(-\d+)?$/, '').lastIndexOf('/');
+    return cut < 0 ? [text, ''] : [text.slice(cut + 1), text.slice(0, cut)];
+  }
+  function groupFor(tool) {
+    const family = FAMILIES[tool] || [tool, 'tool', tool, tool];
+    if (s.group && s.group.key === family[0]) return s.group;
+    const card = el('section', 'block card');
+    const head = el('div', 'card-head');
+    const title = el('span', '', family[2]);
+    const count = el('span', 'count');
+    count.hidden = true;
+    head.append(icon(family[1]), title, count);
+    card.append(head);
+    add(card);
+    s.group = { key: family[0], family, card, title, count, size: 0 };
+    return s.group;
+  }
+  function addTool(r) {
+    endThinking();
+    const group = groupFor(r.tool);
+    group.size += 1;
+    group.title.textContent = group.size > 1 ? group.family[3] : group.family[2];
+    group.count.hidden = group.size < 2;
+    group.count.textContent = String(group.size);
+    const isSearch = ['grep', 'glob', 'find'].includes(r.tool);
+    const row = el('div', 'row' + (r.tool === 'bash' || isSearch ? ' cmd' : ''));
+    const head = el('button', 'row-head');
+    head.type = 'button';
+    const dot = el('span', 'dot');
+    const time = el('span', 'time');
+    head.append(el('span', 'chev', '▶'));
+    if (r.tool === 'bash') {
+      head.append(el('span', 'name', String(r.target || '').replace(/^cd \/workspace\s*&&\s*/, '')));
+    } else if (isSearch) {
+      head.append(el('span', 'name', String(r.target || '').replace(/^\/workspace\/?/, '') || '.'));
+    } else {
+      const [name, dir] = splitPath(r.target);
+      head.append(el('span', 'name', name), el('span', 'path', dir));
+    }
+    head.append(time, dot);
+    head.title = String(r.target || '');
+    const details = el('div', 'details');
+    head.addEventListener('click', () => row.classList.toggle('open'));
+    row.append(head, details);
+    group.card.append(row);
+    const item = { tool: r.tool, row, dot, time, details, parts: {}, failed: false };
+    details.append(
+      el('div', 'label', r.tool === 'bash' ? 'Command' : 'Target'),
+      el('pre', 'code', String(r.target || '(none)')),
+      el('div', 'note', r.id ? 'Waiting for the tool result…' : 'This step ran before tool details were recorded, so only the target is available.'),
+    );
+    if (r.id) {
+      s.rows.set(r.id, item);
+      for (const d of s.early.get(r.id) || []) addDetail(item, d);
+      s.early.delete(r.id);
+    }
+    if (!s.pending.has(r.tool)) s.pending.set(r.tool, []);
+    s.pending.get(r.tool).push(item);
+  }
+  function endTool(r) {
+    const queue = s.pending.get(r.tool) || [];
+    let item = r.id ? s.rows.get(r.id) : queue[0];
+    if (!item) return;
+    const at = queue.indexOf(item);
+    if (at >= 0) queue.splice(at, 1);
+    item.dot.className = 'dot ' + (r.ok ? 'ok' : 'bad');
+    item.failed = !r.ok;
+    if ((r.seconds || 0) >= 1) item.time.textContent = span(r.seconds);
+    if (!r.ok) showError(item);
+  }
+  function showError(item) {
+    if (!item.failed || item.errorShown || !item.parts.result) return;
+    item.errorShown = true;
+    const line = item.parts.result.text.split('\n').find((x) => x.trim()) || 'Tool failed';
+    item.details.before(el('div', 'err-line', line.slice(0, 220)));
+  }
+  function shownArgs(tool, text) {
+    try {
+      const value = JSON.parse(text);
+      if (tool === 'bash' && typeof value.command === 'string') return value.command;
+      if (tool === 'write' && typeof value.content === 'string') return value.content;
+    } catch (_) { /* Show the raw text. */ }
+    return text;
+  }
+  function addDetail(item, r) {
+    item.parts[r.part] = r;
+    item.details.replaceChildren();
+    for (const [part, label] of [['args', item.tool === 'bash' ? 'Command' : item.tool === 'write' ? 'Content' : 'Input'], ['result', 'Result']]) {
+      const d = item.parts[part];
+      if (!d) continue;
+      item.details.append(el('div', 'label', label), el('pre', 'code', part === 'args' ? shownArgs(item.tool, d.text) : d.text || '(empty)'));
+      if (d.truncated) item.details.append(el('div', 'note', 'Shortened to the first 24,000 characters.'));
+    }
+    showError(item);
+  }
+  function detail(r) {
+    const item = s.rows.get(r.id);
+    if (item) { addDetail(item, r); return; }
+    if (!s.early.has(r.id)) s.early.set(r.id, []);
+    s.early.get(r.id).push(r);
+  }
+  function notice(title, text, good) {
+    s.group = null;
+    const box = el('section', 'block notice' + (good ? ' good' : ''));
+    box.append(el('strong', '', title));
+    if (text) box.append(document.createTextNode(' ' + text));
+    return add(box);
+  }
+  function finish(r) {
+    endThinking();
+    s.running = false; s.ended = true; s.end = r.t || Date.now() / 1000;
+    const ending = ENDINGS[r.status] || [String(r.status || 'Ended'), 'warn'];
+    setPill(ending[0], ending[1]);
+    setNow(ending[0]);
+    const files = Array.isArray(r.files) ? r.files : [];
+    const box = notice(ending[0], files.length + (files.length === 1 ? ' file changed' : ' files changed') + (r.seconds ? ' in ' + span(r.seconds) : ''), ending[1] === 'ok');
+    if (files.length) {
+      const list = el('ul', 'files');
+      for (const name of files.slice(0, 40)) list.append(el('li', '', name));
+      box.append(list);
+    }
+  }
+  function handle(r) {
+    if (r.t) s.last = r.t;
+    switch (r.kind) {
+      case 'start':
+        if (s.start) reset();
+        s.start = r.t; s.running = true; s.title = String(r.title || 'Step');
+        $('title').textContent = s.title; $('title').title = s.title;
+        $('sub').textContent = [r.phase === 'propose' ? 'Approach' : 'Implement', r.repo_name, r.model].filter(Boolean).join(' · ');
+        setPill('Running', 'running');
+        setNow('Starting…');
+        break;
+      case 'activity':
+        setNow(ACTIVITY[r.state] || String(r.state || 'Working…'));
+        if (r.state !== 'thinking') endThinking();
+        break;
+      case 'thinking': addThinking(String(r.text || '')); setNow('Thinking…'); break;
+      case 'tool_start': addTool(r); setNow('Running ' + r.tool + '…'); break;
+      case 'tool_end': endTool(r); break;
+      case 'detail': detail(r); break;
+      case 'turn':
+        endThinking();
+        s.turns += 1;
+        s.tokens += r.output || 0;
+        if (r.tps > 0 && r.output > 0) s.generating += r.output / r.tps;
+        if (r.context) { s.context = r.context; s.peak = Math.max(s.peak, r.context); }
+        if (r.error) { s.errors += 1; notice('Model error', r.error); }
+        break;
+      case 'check_start': endThinking(); notice('Running check', r.command || '', true); setNow('Running check…'); break;
+      case 'check_end': notice(r.passed ? 'Check passed' : 'Check failed', r.passed ? '' : 'Exit code ' + r.exit_code, !!r.passed); break;
+      case 'end': finish(r); break;
+    }
+  }
+  function reset() {
+    s = blank();
+    log.replaceChildren(el('div', '', ''));
+    log.firstChild.id = 'empty';
+    log.firstChild.textContent = "The local model's thinking and tool calls will appear here when a step starts.";
+    $('title').textContent = 'Implementer';
+    $('sub').textContent = 'Waiting for a plan step';
+    setPill('Idle');
+    setNow('Idle');
+    stick = true;
+    $('latest').classList.remove('show');
+    renderStats();
+  }
+  function follow() {
+    if (stick) log.scrollTop = log.scrollHeight;
+    else $('latest').classList.add('show');
+  }
+  log.addEventListener('scroll', () => {
+    stick = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    if (stick) $('latest').classList.remove('show');
+  });
+  $('latest').addEventListener('click', () => { stick = true; log.scrollTop = log.scrollHeight; $('latest').classList.remove('show'); });
+  setInterval(() => { if (s.running) renderStats(); }, 1000);
+
+  reset();
+  window.implementer = {
+    reset,
+    addBatch(encoded) {
+      const binary = atob(encoded);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      for (const line of new TextDecoder().decode(bytes).split('\n')) {
+        if (!line.trim()) continue;
+        try { handle(JSON.parse(line)); } catch (_) { /* Skip a malformed row. */ }
+      }
+      renderStats();
+      follow();
+    },
+    setAlive(alive) {
+      if (alive || !s.running || s.ended) return;
+      endThinking();
+      s.running = false;
+      setPill('Stopped', 'bad');
+      setNow('The step process has stopped');
+      renderStats();
+    },
+    theme(t) {
+      const root = document.documentElement.style;
+      if (/^#[0-9a-f]{6}$/i.test(t.bg)) root.setProperty('--bg', t.bg);
+      if (/^#[0-9a-f]{6}$/i.test(t.fg)) root.setProperty('--fg', t.fg);
+      if (/^[\w -]{1,60}$/.test(t.font || '')) root.setProperty('--ui', '"' + t.font + '", Inter, system-ui, sans-serif');
+    },
+  };
+})();
+</script>
+</body>
+</html>

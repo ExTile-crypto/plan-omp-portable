@@ -1,0 +1,181 @@
+#!/usr/bin/python3 -I
+"""Start Claude Code with only what the plan-omp flow needs.
+
+Run as plan-omp-lean from a terminal, or set plan-omp-lean-cc as the Claude CLI
+path in CC GUI. The CC GUI wrapper changes only repositories enabled with
+`plan-omp-lean --gui on`. Everything else goes to Claude Code unchanged.
+"""
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+ADVISOR = ROOT / "advisor.md"
+BUNDLED = Path.home() / ".codemoss/dependencies/claude-sdk/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude"
+DEFAULT_URL = "http://127.0.0.1:8080/v1"
+TOOLS = "Bash,Read,Edit,Write,Grep,Glob,Agent"
+ENABLED = "gui-enabled"
+
+
+def plan_dir() -> tuple[Path, Path] | None:
+    result = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    git_dir = Path(result.stdout.strip())
+    state = Path(os.environ.get("PLAN_OMP_LEAN_STATE_ROOT") or ROOT / "state")
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", git_dir.parent.name).strip("-") or "repo"
+    digest = hashlib.sha256(str(git_dir).encode()).hexdigest()[:8]
+    return git_dir, state / f"{name}-{digest}"
+
+
+def import_existing(git_dir: Path, target: Path) -> None:
+    """Copy an omp plan once. The originals are never changed."""
+    source = git_dir / "plan-omp"
+    if (target / "run.md").exists() or not (source / "run.md").exists():
+        return
+    for name in ("brief.md", "map.md", "run.md"):
+        if (source / name).is_file():
+            shutil.copy2(source / name, target / name)
+    for name in ("steps", "partial", "patches"):
+        if (source / name).is_dir():
+            shutil.copytree(source / name, target / name, dirs_exist_ok=True, symlinks=True)
+    verify = git_dir / "plan-omp-verify.sh"
+    if verify.is_file():
+        script = verify.read_text().replace('cd "$(dirname "$0")/.."', f"cd {shlex.quote(str(git_dir.parent))}")
+        (target / "verify.sh").write_text(script)
+        (target / "verify.sh").chmod(verify.stat().st_mode & 0o777)
+    print(f"Copied the existing plan to {target}", file=sys.stderr)
+
+
+def system_prompt(plan: Path) -> str:
+    text = (ROOT / "system.md").read_text().replace("{{PLAN_DIR}}", str(plan))
+    url = os.environ.get("PLAN_OMP_LEAN_URL", "").rstrip("/")
+    runs = os.environ.get("PLAN_OMP_LEAN_RUNS_DIR", "")
+    extra = ""
+    if url:
+        text = text.replace(DEFAULT_URL, url)
+        extra += f' --url "{url}"'
+    if runs:
+        extra += f' --runs-dir "{runs}"'
+    return text.replace('--check "<verify-command>"', '--check "<verify-command>"' + extra)
+
+
+def agents_json() -> str:
+    return json.dumps({
+        "plan-omp-advisor": {
+            "description": "Read-only advisor for risky plan-omp patches. Returns continue, revise, or stop.",
+            "prompt": ADVISOR.read_text(),
+            "tools": ["Read", "Grep", "Glob"],
+            "model": os.environ.get("PLAN_OMP_LEAN_ADVISOR_MODEL", "sonnet"),
+        }
+    })
+
+
+def lean_gui_args(args: list[str], plan: Path) -> list[str]:
+    kept: list[str] = []
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in ("--tools", "--system-prompt", "--system-prompt-file"):
+            skip = True
+        elif not arg.startswith(("--tools=", "--system-prompt=", "--system-prompt-file=")):
+            kept.append(arg)
+    return [
+        "--system-prompt", system_prompt(plan),
+        "--tools", TOOLS,
+        "--strict-mcp-config",
+        "--add-dir", str(plan),
+        "--agents", agents_json(),
+        *kept,
+    ]
+
+
+def gui_main() -> int:
+    args = sys.argv[1:]
+    real = os.environ.get("PLAN_OMP_LEAN_REAL_CLI") or (str(BUNDLED) if BUNDLED.exists() else shutil.which("claude"))
+    if not real:
+        print("Claude Code was not found.", file=sys.stderr)
+        return 127
+    final = args
+    is_chat = "stream-json" in args and "--input-format" in args and "--strict-mcp-config" not in args
+    if is_chat:
+        try:
+            found = plan_dir()
+            if found and (found[1] / ENABLED).exists() and ADVISOR.exists():
+                final = lean_gui_args(args, found[1])
+        except Exception as error:
+            print(f"plan-omp-lean: using normal Claude Code ({type(error).__name__})", file=sys.stderr)
+            final = args
+    os.execv(real, [real, *final])
+
+
+def gui_toggle(args: list[str]) -> int:
+    action = args[0] if args else "status"
+    found = plan_dir()
+    if found is None:
+        print("Run this from inside a git repository.", file=sys.stderr)
+        return 1
+    git_dir, plan = found
+    marker = plan / ENABLED
+    if action == "on":
+        plan.mkdir(parents=True, exist_ok=True, mode=0o700)
+        import_existing(git_dir, plan)
+        marker.touch()
+    elif action == "off":
+        marker.unlink(missing_ok=True)
+    elif action != "status":
+        print("Use: plan-omp-lean --gui on|off|status", file=sys.stderr)
+        return 2
+    print(f"CC GUI lean mode is {'on' if marker.exists() else 'off'} for {git_dir.parent}")
+    return 0
+
+
+def main() -> int:
+    if Path(sys.argv[0]).name == "plan-omp-lean-cc":
+        return gui_main()
+    args = sys.argv[1:]
+    if args[:1] == ["--gui"]:
+        return gui_toggle(args[1:])
+    passthrough = []
+    if "--" in args:
+        split = args.index("--")
+        args, passthrough = args[:split], args[split + 1:]
+    if not shutil.which("claude"):
+        print("claude was not found on PATH.", file=sys.stderr)
+        return 1
+    if not ADVISOR.exists():
+        print(f"Advisor instructions are missing: {ADVISOR}", file=sys.stderr)
+        return 1
+    found = plan_dir()
+    if found is None:
+        print("Run plan-omp-lean from inside a git repository.", file=sys.stderr)
+        return 1
+    git_dir, plan = found
+    plan.mkdir(parents=True, exist_ok=True, mode=0o700)
+    import_existing(git_dir, plan)
+    goal = " ".join(args).strip()
+    if goal.startswith("-"):
+        goal = "Goal: " + goal
+    command = [
+        "claude",
+        *([goal] if goal else []),
+        "--model", os.environ.get("PLAN_OMP_LEAN_MODEL", "opus"),
+        "--system-prompt", system_prompt(plan),
+        "--tools", TOOLS,
+        "--strict-mcp-config",
+        "--add-dir", str(plan),
+        "--agents", agents_json(),
+        *passthrough,
+    ]
+    os.execvp("claude", command)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

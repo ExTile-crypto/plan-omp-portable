@@ -7,6 +7,17 @@ One built copy serves omp, Codex, OpenCode and Cursor. Antigravity needs its own
 folder. Marshall has no skill loader and follows the same instructions from a
 prompt.
 
+For a lighter Claude Code setup, CC GUI, and the live Implementer panel for
+IntelliJ, see the **[Claude Code and CC GUI guide](docs/claude-code.md)**.
+
+## How it works
+
+1. The planner reads the code, splits the goal into steps, and marks each step
+   risky or routine. It writes the approach for risky steps itself.
+2. The local model implements one step at a time in a sandbox and returns a patch.
+3. A read-only advisor checks patches for risky steps.
+4. The planner reviews and applies each patch before the next step starts.
+
 ## Layout
 
 ```
@@ -17,6 +28,10 @@ src/planning-files.md        checkpoint, executor brief, and code map rules
 src/advisor.md               read-only reviewer instructions
 src/omp/plan-omp-advisor.md  omp advisor agent, limited to read, grep and glob
 install_plan_omp.sh          rewrites the copy for a non-Claude harness
+src/lean/                    lean Claude Code launcher and prompt builder
+install_lean.sh              installs the lean launcher
+plugin/                      Implementer panel for IntelliJ
+docs/claude-code.md          Claude Code, CC GUI, and panel guide
 ```
 
 The built copy is **not** in this repository, and it must not be: the installer
@@ -97,6 +112,8 @@ and never enter a patch or commit:
 | `map.md` | Short pointers to the files and symbols behind each feature |
 
 Start the skill with the same goal to resume. Delete `.git/plan-omp/` to clear them.
+The lean Claude Code launcher keeps its plans in `~/plan-omp-lean/state/` instead,
+because Claude Code protects `.git`.
 
 ## Watch progress and usage
 
@@ -106,7 +123,7 @@ plan-omp-watch --repo . --tokens  # print the totals and exit
 plan-omp-watch --repo . --reset   # count from zero, keeping all logs
 ```
 
-Local usage is cyan and Anthropic usage is magenta. `reread` is cached context
+The watcher also streams the local model's thinking. Local usage is cyan and Anthropic usage is magenta. `reread` is cached context
 sent again on a later request. `≥` marks a minimum, because steps from older
 executor versions did not record their cache split. Local work appears as the
 executor, `planner`, or `subagent`.
@@ -144,3 +161,4 @@ executor, reads the patch, and applies it only after reviewing it.
 | Executor cannot reach the model | server stopped or on another port | start it, or set `LOCAL_LLM_URL` |
 | Check cannot find Java, Maven or `node_modules` | sandbox sees only the repository and `/usr` | omit `--check` and run the saved verify command after applying the patch |
 | The advisor changed a file | harness cannot enforce read-only tools | run `git -C <repo> status` after each advisor call and discard what it changed |
+| Status `repeated_text` | the local model looped while writing | fix the listed lines, or retry with the exact text in the step |
